@@ -95,7 +95,7 @@ First joining player_age and player_hw
 player_info_1 <- player_age_clean %>%
   full_join(player_hw_clean, by = "name")
 
-player_info <- player_info_1 %>%
+player_info_2 <- player_info_1 %>%
   full_join(player_stats, by = "name")
 ```
 
@@ -127,13 +127,110 @@ convert_to_sign <- function(birthday) {
 
 ```{r}
 
-str(player_info_sign$weight)
-player_info_sign <- player_info %>%
+str(player_info$penalty_minutes)
+player_info <- player_info_2 %>%
+  #using this function to make a column for astrological sign
   mutate(sign = convert_to_sign(birthday)) %>%
-  #also adding bmi
+  #we have two columns for team, get rid of one
+  select(!c(teams)) %>%
+  mutate_at(vars(games_played:face_off_wins), parse_number) %>%
+  #also adding bmi and converting some variables to numbers
   mutate(weight = parse_number(weight),
+         age = parse_number(age),
+         rank = parse_number(rank),
          bmi = weight / ((height_cm / 100) ^ 2))
+
 
 ls(player_info)
 ```
+
+Now I have two main datasets to work from
+player_info
+game_stats_clean
+
+Lets do some exporatory data analysis
+```{r}
+player_info %>%
+  group_by(team) %>%
+  summarize(mean_age = mean(age),
+            mean_height = mean(height_cm),
+            mean_weight = mean(weight)) %>%
+  arrange(mean_age)
+
+```
+
+Any trend with month born?
+```{r}
+player_info %>%
+  mutate(month = month(birthday)) %>%
+  ggplot(aes(x = as.factor(month))) +
+  geom_bar(stat = "count") +
+  theme_classic()
+```
+Seems like April and May might have slightly higher numbers
+
+How about astrological sign
+```{r}
+player_info %>%
+  ggplot(aes(x = as.factor(sign))) +
+  geom_bar(stat = "count") +
+  theme_classic()
+
+```
+Ok... slightly more aeries... could test to see if this is more signficant
+
+What about penalty minutes vs sign?
+```{r}
+player_info %>%
+  ggplot(aes(x = reorder(sign, -penalty_minutes), y = penalty_minutes)) +
+  geom_boxplot() +
+  #add means to the boxplot using yellow diamonds
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2, color="black", fill="yellow") +
+  theme_classic()
+
+```
+Not really much correlation here
+
+Ok lets look at a whole bunch of variables with astrological sign
+```{r}
+player_info %>%
+  group_by(sign) %>%
+  summarize(mean_age = mean(age),
+            mean_height = mean(height_cm),
+            mean_weight = mean(weight),
+            mean_penalty = mean(penalty_minutes, na.rm = TRUE),
+            mean_goals = mean(goals, na.rm = TRUE),
+            mean_pp = mean(pp_goals, na.rm = TRUE))
+
+```
+
+
+Oooh goals looks interesting
+```{r}
+player_info %>%
+  ggplot(aes(x = reorder(sign, -goals), y = goals)) +
+  geom_boxplot() +
+  #add means to the boxplot using yellow diamonds
+  stat_summary(fun.y=mean, geom="point", shape=23, size=2, color="black", fill="yellow") +
+  theme_classic()
+
+
+sign_goal_lm <- lm(goals ~ year_born + bmi, data = player_info)
+anova1 <- aov(sign_goal_lm)
+summary(anova1)
+
+#interesting year born, height, bmi
+
+
+```
+
+
+Year born vs goals
+```{r}
+player_info %>%
+  ggplot(aes(x = year_born, y = goals)) +
+  geom_point() +
+  theme_classic()
+```
+
 
