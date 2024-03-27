@@ -1,0 +1,51 @@
+---
+title: "Lacrosse Data Viz"
+author: "Lauren Gill"
+date: "3/26/2024"
+output: pdf_document
+---
+
+Load in libraries
+```{r}
+library(tidyverse)
+```
+
+Read in data
+```{r}
+player_age <- read_csv("data/player_age.csv")
+player_hw <- read_csv("data/player_height_weight.csv")
+player_stats <- read_csv("data/player_stats.csv")
+game_stats <- read_csv("data/game_stats.csv")
+```
+
+Lets do some data cleaning
+First start with game_stats dataframe
+```{r}
+head(game_stats)
+
+game_stats_clean <- game_stats %>%
+  rename(week = "Week",
+         date = "Date",
+         over_time = "OT",
+         attendance = "Attendance",
+         score = "Score",
+         diff = "Diff",
+         total_goals = "Total",
+         winner = "Winner",
+         teams = "Final") %>%
+  separate(teams, into = c('home_team', 'away_team'), sep = "@") %>%
+  separate(score, into = c('home_score', 'away_score'), sep = "-") %>%
+  #getting rid of the score at the end of the name in home_team
+  mutate(across(home_team,
+                ~str_replace_all(., "[0-9]+", ""))) %>%
+  #same thing with away_team
+  mutate(across(away_team,
+                ~str_replace_all(., "[0-9]+", ""))) %>%
+  #changing overtime to 1s and 0
+  mutate(ot = case_when(over_time == "OT" ~1,
+                          is.na(over_time) ~ 0)) %>%
+  #now getting rid of the original over_time column
+  select(!c(over_time))
+```
+
+
