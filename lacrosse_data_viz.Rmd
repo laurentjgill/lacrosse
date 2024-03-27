@@ -8,6 +8,7 @@ output: pdf_document
 Load in libraries
 ```{r}
 library(tidyverse)
+library(lubridate)
 ```
 
 Read in data
@@ -48,4 +49,91 @@ game_stats_clean <- game_stats %>%
   select(!c(over_time))
 ```
 
+Now cleaning player age and player hw
+```{r}
+head(player_age)
+player_age_clean <- player_age %>%
+  #i like lowercase variable names
+  rename(rank = "Rank",
+         name = "Player",
+         team = "Team",
+         birthdate = "Birthdate",
+         age = "Age") %>%
+  #reformating date with the lubridate package
+  mutate(birthday = dmy(birthdate),
+         year_born = year(birthday)) %>%
+  select(!c(birthdate)) %>%
+  #some entries have (R) at the end, we want to get rid of this
+  mutate(across(name,
+                ~str_replace_all(., "[(][R][)]", ""))) %>%
+  #trimmin the white space off the ends of some of the names
+  mutate(name = trimws(name))
+```
+
+```{r}
+head(player_hw)
+
+player_hw_clean <- player_hw %>%
+  separate(height, c('feet', 'inches'), "'", convert = TRUE) %>% 
+    #getting rid of the " at the end of the inches column
+  mutate(across(inches,
+                ~str_replace_all(., "[^[:alnum:]///' ]", ""))) %>%
+  #converting height to a whole number
+  mutate(inches = as.numeric(inches),
+         height_cm = (12*feet + inches)*2.54)
+```
+
+Finally cleaning the player_stats
+```{r}
+head(player_stats)
+```
+Never mind it looks good!
+
+Ok so now I will join a few of these data frames
+First joining player_age and player_hw
+```{r}
+player_info_1 <- player_age_clean %>%
+  full_join(player_hw_clean, by = "name")
+
+player_info <- player_info_1 %>%
+  full_join(player_stats, by = "name")
+```
+
+Adding in a fun variable (sign)
+First making a function
+```{r}
+convert_to_sign <- function(birthday) {
+  month_day <- as.Date(birthday, format = "%Y-%m-%d")
+  month <- lubridate::month(month_day)
+  day <- lubridate::day(month_day)
+  
+  case_when(
+    (month == 3 & day >= 21) | (month == 4 & day <= 19) ~ "Aries",
+    (month == 4 & day >= 20) | (month == 5 & day <= 20) ~ "Taurus",
+    (month == 5 & day >= 21) | (month == 6 & day <= 20) ~ "Gemini",
+    (month == 6 & day >= 21) | (month == 7 & day <= 22) ~ "Cancer",
+    (month == 7 & day >= 23) | (month == 8 & day <= 22) ~ "Leo",
+    (month == 8 & day >= 23) | (month == 9 & day <= 22) ~ "Virgo",
+    (month == 9 & day >= 23) | (month == 10 & day <= 22) ~ "Libra",
+    (month == 10 & day >= 23) | (month == 11 & day <= 21) ~ "Scorpio",
+    (month == 11 & day >= 22) | (month == 12 & day <= 21) ~ "Sagittarius",
+    (month == 12 & day >= 22) | (month == 1 & day <= 19) ~ "Capricorn",
+    (month == 1 & day >= 20) | (month == 2 & day <= 18) ~ "Aquarius",
+    (month == 2 & day >= 19) | (month == 3 & day <= 20) ~ "Pisces",
+    TRUE ~ NA_character_
+  )
+}
+```
+
+```{r}
+
+str(player_info_sign$weight)
+player_info_sign <- player_info %>%
+  mutate(sign = convert_to_sign(birthday)) %>%
+  #also adding bmi
+  mutate(weight = parse_number(weight),
+         bmi = weight / ((height_cm / 100) ^ 2))
+
+ls(player_info)
+```
 
