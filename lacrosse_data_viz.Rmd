@@ -34,19 +34,24 @@ game_stats_clean <- game_stats %>%
          total_goals = "Total",
          winner = "Winner",
          teams = "Final") %>%
-  separate(teams, into = c('home_team', 'away_team'), sep = "@") %>%
-  separate(score, into = c('home_score', 'away_score'), sep = "-") %>%
-  #getting rid of the score at the end of the name in home_team
+  separate(teams, into = c('away_team', 'home_team'), sep = "@") %>%
+  #seperating  the score at the end of the name in away_team
+  mutate(away_score = str_extract_all(away_team, "[0-9]+")) %>%
+  #seperating  the score at the end of the name in home_team
+  mutate(home_score = str_extract_all(home_team, "[0-9]+")) %>%
+  #get rid of scores in the colimn now 
   mutate(across(home_team,
                 ~str_replace_all(., "[0-9]+", ""))) %>%
-  #same thing with away_team
   mutate(across(away_team,
                 ~str_replace_all(., "[0-9]+", ""))) %>%
   #changing overtime to 1s and 0
   mutate(ot = case_when(over_time == "OT" ~1,
                           is.na(over_time) ~ 0)) %>%
   #now getting rid of the original over_time column
-  select(!c(over_time))
+  select(!c(over_time, score)) %>%
+  #trim ws
+  mutate(away_team = trimws(away_team),
+         home_team = trimws(home_team))
 ```
 
 Now cleaning player age and player hw
@@ -166,6 +171,13 @@ player_info %>%
   ggplot(aes(x = as.factor(month))) +
   geom_bar(stat = "count") +
   theme_classic()
+
+player_info %>%
+  mutate(month = month(birthday)) %>%
+  group_by(month) %>%
+  summarize(mean_goals = mean(goals, na.rm = TRUE)) %>%
+  arrange(desc(mean_goals))
+
 ```
 Seems like April and May might have slightly higher numbers
 
@@ -219,6 +231,11 @@ sign_goal_lm <- lm(goals ~ year_born + bmi, data = player_info)
 anova1 <- aov(sign_goal_lm)
 summary(anova1)
 
+player_info %>%
+  group_by(sign) %>%
+  summarize(mean_goals = mean(pts, na.rm = TRUE)) %>%
+  arrange(desc(by = mean_goals))
+
 #interesting year born, height, bmi
 
 
@@ -227,10 +244,284 @@ summary(anova1)
 
 Year born vs goals
 ```{r}
+mean(player_info$height_cm, na.rm = TRUE )
+
 player_info %>%
   ggplot(aes(x = year_born, y = goals)) +
   geom_point() +
   theme_classic()
 ```
 
+Now to analze games
+First need to make the variables numeric
+```{r}
+
+game_stats_clean %>%
+  group_by(home_team) %>%
+  summarize(mean_home_score = mean(as.numeric(home_score)),
+            mean_away_score = mean(as.numeric(away_score)))
+
+#proportion of goals
+game_stats_clean %>%
+  group_by(home_team) %>%
+  summarize(home = mean(as.numeric(home_score)/total_goals),
+            away = mean(as.numeric(away_score)/total_goals),
+            diffhome_away = as.numeric(home_score) - as.numeric(away_score))%>%
+  pivot_longer(!home_team, names_to = "home_away", values_to = "prop_goals") %>%
+  ggplot(aes(x = home_team, y = prop_goals, fill = home_away)) +
+    geom_bar(stat = "identity", position = "dodge")
+
+#warriors specific
+game_stats_clean %>%
+  filter(home_team == "Vancouver Warriors") %>%
+  summarize(mean_home_score = mean(as.numeric(home_score)),
+            mean_away_score = mean(as.numeric(away_score)))
+
+game_stats_clean %>%
+  group_by(winner) %>%
+  summarize(mean_home_score = mean(as.numeric(home_score)),
+            mean_away_score = mean(as.numeric(away_score)),
+            mean_diff = mean(diff))
+
+game_stats_clean %>%
+  summarize(mean_home_score = mean(as.numeric(home_score)),
+            mean_away_score = mean(as.numeric(away_score)))
+
+```
+
+Score by attendance
+```{r}
+game_stats_clean %>%
+  ggplot(aes(x = attendance, y = as.numeric(home_score))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+#for warriors specifically
+game_stats_clean %>%
+  filter(home_team == "Vancouver Warriors") %>%
+  ggplot(aes(x = attendance, y = as.numeric(home_score))) +
+  geom_point()
+
+game_stats_clean %>%
+  ggplot(aes(x = attendance, y = as.numeric(away_score))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+#total goals vs attendance, nothing
+game_stats_clean %>%
+  ggplot(aes(x = attendance, y = as.numeric(total_goals))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+
+#which team has the highest attendance at home games
+game_stats_clean %>%
+  group_by(home_team) %>%
+  summarize(mean_attendance  = mean(attendance)) %>%
+  arrange(desc(by = mean_attendance))
+
+#more home wins.. statistically significnat though?? prob not (50 vs 57)
+table(game_stats_clean$winner)
+
+```
+Adding a column in game_stats for day
+```{r}
+
+game_stats_clean <- game_stats_clean %>%
+  mutate(date = mdy(date),
+         weekday = wday(date))
+
+#does attendance vary by weekday
+#yes monday games are less attended
+game_stats_clean %>%
+  ggplot(aes(x = as.factor(weekday), y = attendance)) +
+  geom_boxplot()
+
+#ok so does this effect goals, perhaps!
+game_stats_clean %>%
+  ggplot(aes(x = as.factor(weekday), y = total_goals)) +
+  geom_boxplot()
+```
+
+```{r}
+game_stats_lm <- lm(ot ~ weekday+ week+ winner, 
+                    data = game_stats_clean)
+summary(aov(game_stats_lm))
+
+#only significnat thing is ot?? usually no ot on sundays
+game_stats_clean %>%
+  group_by(weekday) %>%
+  summarize(prop_ot  = mean(ot),
+            number = length(ot)) %>%
+  arrange(by = prop_ot) %>%
+  ggplot(aes(x= as.factor(weekday), y= prop_ot)) +
+  geom_bar(stat = "identity")
+
+
+game_stats_clean %>%
+  group_by(weekday) %>%
+  summarize(prop_ot  = mean(ot),
+            number = length(ot)) %>%
+  arrange(by = prop_ot)
+```
+
+
+## Interesting trends
+- Goals by star sign (check)
+- Overtime on weekdays (check)
+- Home vs away games
+- Best attended games (check)
+- penalty minutes by height/age and blocked shots
+
+
+Maybe we can look at some warrior specific stats
+```{r}
+player_info %>%
+  filter(team == "Vancouver Warriors") %>%
+  group_by(sign) %>%
+  summarize(n = n()) %>%
+  arrange(by = n)
+#Libra and Taurus
+
+player_info %>%
+  filter(team == "Vancouver Warriors") %>%
+  arrange(desc(by = penalty_minutes))
+
+player_lm <- lm(penalty_minutes ~ age + rank + height_cm + weight + goals + loose_ball + blocked_shots + bmi, data = player_info)
+summary(aov(player_lm))
+#loose ball, blocked shot, age
+
+player_info %>%
+  ggplot(aes(x = age, y = penalty_minutes)) +
+  geom_point(colour = "black") +
+  geom_smooth(method = "lm", colour = "red", fill = "red") +
+  theme_classic() +
+  labs(x = "Age", y = "Penalty Minutes")
+
+player_info %>%
+  group_by(age) %>%
+  summarize(mean_min = mean(penalty_minutes, na.rm = TRUE))
+
+
+player_info %>%
+  ggplot(aes(x = blocked_shots, y = penalty_minutes)) +
+  geom_point() +
+  geom_smooth(method = "lm", colour = "red", fill = "red")
+
+player_info %>%
+  group_by(name) %>%
+  summarize(mean_min = mean(penalty_minutes, na.rm = TRUE),
+            mean_blocked = mean(blocked_shots, na.rm = TRUE))
+
+player_info %>%
+  ggplot(aes(x = loose_ball, y = penalty_minutes)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+# one huge outlier that seems to be driving this trend
+
+player_info %>%
+  ggplot(aes(x = height_cm, y = penalty_minutes)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+```
+
+
+Height of lacrosse players
+```{r}
+mean(player_info$height_cm, na.rm = TRUE)
+#185.27 cm
+
+max(player_info$height_cm, na.rm = TRUE)
+#203.2 cm
+min(player_info$height_cm, na.rm = TRUE)
+#167.64 cm
+
+mean(player_info$age, na.rm = TRUE)
+#27.8
+
+player_info %>%
+  group_by(sign) %>%
+  summarize(n = n())
+```
+
+do shorter names do better/worse
+```{r}
+player_name <- player_info %>%
+  separate(name, into =c("first", "last" ), sep = " ") %>%
+  mutate(first_letters = nchar(first),
+         last_letters = nchar(last))
+
+#any player differenes, nno
+player_name %>%
+  ggplot(aes(x = last_letters, y = games_played)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+#by team
+player_name %>%
+  group_by(team) %>%
+  summarize(mean_last = mean(last_letters)) %>%
+  arrange(desc(mean_last))
+  
+mean(game_stats_clean$total_goals)
+```
+
+
+Do players with an animal mascot play better
+```{r}
+table(player_info$team)
+
+animal <- c("Albany FireWolves", 
+                  "Halifax Thunderbirds",
+                  "Las Vegas Desert Dogs",
+                  "Panther City Lacrosse Club",
+                  "Rochester Knighthawks",
+                  "San Diego Seals",
+                  "Colorado Mammoth")
+non_animal <- c("Buffalo Bandits", 
+                "Calgary Roughnecks",
+                "Georgia Swarm",
+                "New York Riptide",
+                "Philadelphia Wings",
+                "Saskatchewan Rush",
+                "Toronto Rock",
+                "Vancouver Warriors")
+mascot <- player_info %>%
+  mutate(animal_mascot = case_when(team %in% animal ~ 1,
+    team %in% non_animal ~ 0,
+    TRUE ~ NA_integer_))
+
+mascot %>%
+  mutate(animal_mascot = as.factor(animal_mascot)) %>%
+  group_by(animal_mascot) %>%
+  summarize(mean_penalty = mean(penalty_minutes, na.rm = TRUE),
+            mean_pts = mean(pts, na.rm = TRUE))
+
+mascot_games <- game_stats_clean %>%
+  mutate(animal_mascot_home = case_when(home_team %in% animal ~ 1,
+    home_team %in% non_animal ~ 0,
+    TRUE ~ NA_integer_))
+
+mascot_games %>%
+  mutate(animal_mascot_home = as.factor(animal_mascot_home)) %>%
+  group_by(animal_mascot_home) %>%
+  summarize(mean_score = mean(as.numeric(home_score), na.rm = TRUE))
+```
+```{r}
+mean(as.numeric(game_stats_clean$home_score))
+mean(as.numeric(game_stats_clean$away_score))
+```
+
+Hall of fame
+```{r}
+player_info %>%
+  group_by(team)%>%
+  summarize(mean_height = mean(height_cm),
+            mean_age = mean(age),
+            mean_pen = mean(penalty_minutes),
+            mean_shots = mean(shots_on_goal),
+            max_faceoff = mean(face_off_wins)) %>%
+  arrange(desc(max_faceoff))
+```
 
